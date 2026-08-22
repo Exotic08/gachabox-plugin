@@ -1,0 +1,15 @@
+name: GachaBox
+version: 1.0.0
+main: com.belovexotic.gachabox.GachaBoxPlugin
+api-version: '1.21'
+author: BelovExotic
+depend: [Vault]
+description: Hop qua Gacha ngau nhien, mua bang Ecoin, admin tu them phan thuong
+commands:
+  buyexoticbox:
+    description: Mua hop qua Exotic Box bang Ecoin
+    usage: /buyexoticbox [so_luong]
+  exoticbox:
+    description: Quan ly phan thuong Gacha Box
+    usage: /exoticbox <add|remove|info>
+    permission: gachabox.admin
