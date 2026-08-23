@@ -15,9 +15,11 @@ import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.util.StringUtil;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -63,6 +65,63 @@ public class GachaBoxPlugin extends JavaPlugin {
             return handleExoticBoxAdmin(sender, args);
         }
         return false;
+    }
+
+    // TÍNH NĂNG GỢI Ý LỆNH (TAB COMPLETER)
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        List<String> completions = new ArrayList<>();
+        List<String> commands = new ArrayList<>();
+
+        if (command.getName().equalsIgnoreCase("exoticbox")) {
+            if (args.length == 1) {
+                commands.add("create");
+                commands.add("price");
+                commands.add("skin");
+                commands.add("add");
+                commands.add("remove");
+                commands.add("info");
+                StringUtil.copyPartialMatches(args[0], commands, completions);
+            } else if (args.length == 2) {
+                String sub = args[0].toLowerCase();
+                if (sub.equals("price") || sub.equals("skin") || sub.equals("add") || sub.equals("remove") || sub.equals("info")) {
+                    commands.addAll(boxManager.getAll().keySet());
+                    StringUtil.copyPartialMatches(args[1], commands, completions);
+                } else if (sub.equals("create")) {
+                    completions.add("<tên_hộp>");
+                }
+            } else if (args.length == 3) {
+                String sub = args[0].toLowerCase();
+                if (sub.equals("add")) {
+                    commands.add("item");
+                    commands.add("ecoin");
+                    StringUtil.copyPartialMatches(args[2], commands, completions);
+                } else if (sub.equals("price")) {
+                    completions.add("<giá_tiền>");
+                } else if (sub.equals("skin")) {
+                    completions.add("<mã_base64>");
+                } else if (sub.equals("remove")) {
+                    completions.add("<số_thứ_tự>");
+                }
+            } else if (args.length == 4 && args[0].equalsIgnoreCase("add")) {
+                completions.add("<số_lượng>");
+            } else if (args.length == 5 && args[0].equalsIgnoreCase("add")) {
+                completions.add("<tỉ_lệ>");
+            }
+        } else if (command.getName().equalsIgnoreCase("buyexoticbox")) {
+            if (args.length == 1) {
+                commands.addAll(boxManager.getAll().keySet());
+                StringUtil.copyPartialMatches(args[0], commands, completions);
+            } else if (args.length == 2) {
+                commands.add("1");
+                commands.add("16");
+                commands.add("64");
+                StringUtil.copyPartialMatches(args[1], commands, completions);
+            }
+        }
+
+        Collections.sort(completions);
+        return completions;
     }
 
     private boolean handleBuyBox(CommandSender sender, String[] args) {
@@ -141,18 +200,17 @@ public class GachaBoxPlugin extends JavaPlugin {
 
         meta.getPersistentDataContainer().set(boxIdKey, PersistentDataType.STRING, box.id);
 
-        // Đặt Skin Custom bằng Base64 thông qua Reflection an toàn (Bypass lỗi GitHub Actions)
         if (meta instanceof SkullMeta skullMeta && box.texture != null && !box.texture.isEmpty()) {
             try {
                 Class<?> profileClass = Class.forName("com.mojang.authlib.GameProfile");
                 Class<?> propertyClass = Class.forName("com.mojang.authlib.properties.Property");
-                
+
                 Object profile = profileClass.getConstructor(UUID.class, String.class).newInstance(UUID.randomUUID(), "GachaBox");
                 Object property = propertyClass.getConstructor(String.class, String.class).newInstance("textures", box.texture);
-                
+
                 Object properties = profileClass.getMethod("getProperties").invoke(profile);
                 properties.getClass().getMethod("put", Object.class, Object.class).invoke(properties, "textures", property);
-                
+
                 Field profileField = skullMeta.getClass().getDeclaredField("profile");
                 profileField.setAccessible(true);
                 profileField.set(skullMeta, profile);
