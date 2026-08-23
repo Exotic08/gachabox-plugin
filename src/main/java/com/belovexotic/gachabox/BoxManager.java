@@ -115,6 +115,8 @@ public class BoxManager {
             BoxData box = new BoxData();
             box.id = id;
             box.displayName = yaml.getString(base + ".display-name", id);
+            box.price = yaml.getDouble(base + ".price", 1000.0);
+            box.texture = yaml.getString(base + ".texture", "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNmNlZjlhYTE0ZTg4NDc3M2VhYzEzNGE0ZWU4OTcyMDYzZjQ2NmRlNjc4MzYzY2Y3YjFhMjFhODViNyJ9fX0=");
 
             var rewardList = yaml.getList(base + ".rewards");
             if (rewardList != null) {
@@ -148,6 +150,8 @@ public class BoxManager {
         for (BoxData box : boxes.values()) {
             String base = "boxes." + box.id;
             yaml.set(base + ".display-name", box.displayName);
+            yaml.set(base + ".price", box.price);
+            yaml.set(base + ".texture", box.texture);
 
             java.util.List<Map<String, Object>> rewardList = new java.util.ArrayList<>();
             for (RewardEntry entry : box.rewards) {
