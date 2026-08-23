@@ -1,7 +1,5 @@
 package com.belovexotic.gachabox;
 
-import com.mojang.authlib.GameProfile;
-import com.mojang.authlib.properties.Property;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -143,11 +141,18 @@ public class GachaBoxPlugin extends JavaPlugin {
 
         meta.getPersistentDataContainer().set(boxIdKey, PersistentDataType.STRING, box.id);
 
-        // Đặt Skin Custom bằng Base64 thông qua Reflection an toàn
+        // Đặt Skin Custom bằng Base64 thông qua Reflection an toàn (Bypass lỗi GitHub Actions)
         if (meta instanceof SkullMeta skullMeta && box.texture != null && !box.texture.isEmpty()) {
             try {
-                GameProfile profile = new GameProfile(UUID.randomUUID(), null);
-                profile.getProperties().put("textures", new Property("textures", box.texture));
+                Class<?> profileClass = Class.forName("com.mojang.authlib.GameProfile");
+                Class<?> propertyClass = Class.forName("com.mojang.authlib.properties.Property");
+                
+                Object profile = profileClass.getConstructor(UUID.class, String.class).newInstance(UUID.randomUUID(), "GachaBox");
+                Object property = propertyClass.getConstructor(String.class, String.class).newInstance("textures", box.texture);
+                
+                Object properties = profileClass.getMethod("getProperties").invoke(profile);
+                properties.getClass().getMethod("put", Object.class, Object.class).invoke(properties, "textures", property);
+                
                 Field profileField = skullMeta.getClass().getDeclaredField("profile");
                 profileField.setAccessible(true);
                 profileField.set(skullMeta, profile);
