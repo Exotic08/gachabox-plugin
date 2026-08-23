@@ -21,13 +21,13 @@ import java.util.List;
 public class GachaBoxPlugin extends JavaPlugin {
 
     private Economy economy;
-    private RewardManager rewardManager;
-    private NamespacedKey boxKey;
+    private BoxManager boxManager;
+    private NamespacedKey boxIdKey;
     private static final double BOX_PRICE = 1000.0;
 
     @Override
     public void onEnable() {
-        boxKey = new NamespacedKey(this, "gacha_box");
+        boxIdKey = new NamespacedKey(this, "gacha_box_id");
 
         if (!setupEconomy()) {
             getLogger().severe("[GachaBox] Khong tim thay Vault/Economy! Tat plugin.");
@@ -36,10 +36,10 @@ public class GachaBoxPlugin extends JavaPlugin {
         }
 
         getDataFolder().mkdirs();
-        rewardManager = new RewardManager(this);
+        boxManager = new BoxManager(this);
 
         getServer().getPluginManager().registerEvents(
-                new GachaBoxListener(this, rewardManager, economy), this);
+                new GachaBoxListener(this, boxManager, economy), this);
 
         getLogger().info("[GachaBox] Da bat thanh cong.");
     }
@@ -69,10 +69,23 @@ public class GachaBoxPlugin extends JavaPlugin {
             return true;
         }
 
+        if (args.length < 1) {
+            player.sendMessage("§7Dung: /buyexoticbox <ten_hop> [so_luong]");
+            return true;
+        }
+
+        String rawName = args[0];
+        String id = BoxManager.toId(rawName);
+
+        if (!boxManager.exists(id)) {
+            player.sendMessage("§cKhong tim thay hop ten \"" + rawName + "\". Kiem tra lai ten hoac nho admin tao truoc.");
+            return true;
+        }
+
         int amount = 1;
-        if (args.length >= 1) {
+        if (args.length >= 2) {
             try {
-                amount = Integer.parseInt(args[0]);
+                amount = Integer.parseInt(args[1]);
                 if (amount <= 0) {
                     player.sendMessage("§cSo luong phai lon hon 0.");
                     return true;
@@ -95,24 +108,26 @@ public class GachaBoxPlugin extends JavaPlugin {
 
         economy.withdrawPlayer(player, totalPrice);
 
+        BoxData box = boxManager.get(id);
         int remaining = amount;
         while (remaining > 0) {
             int stackSize = Math.min(remaining, 64);
-            ItemStack box = createGachaBox();
-            box.setAmount(stackSize);
-            player.getInventory().addItem(box);
+            ItemStack boxItem = createGachaBox(box);
+            boxItem.setAmount(stackSize);
+            player.getInventory().addItem(boxItem);
             remaining -= stackSize;
         }
 
         player.sendMessage(String.format(
-                "§d✿ §fĐã mua §e%d §fhộp Exotic Box với giá §6%.0f Ecoin§f!", amount, totalPrice));
+                "§d✿ §fĐã mua §e%d §fhộp §d%s §fvới giá §6%.0f Ecoin§f!",
+                amount, box.displayName, totalPrice));
         return true;
     }
 
-    private ItemStack createGachaBox() {
+    private ItemStack createGachaBox(BoxData box) {
         ItemStack item = new ItemStack(Material.PLAYER_HEAD);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("✿ Exotic Box ✿")
+        meta.displayName(Component.text("✿ " + box.displayName + " ✿")
                 .color(NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.BOLD, true));
 
         List<Component> lore = new ArrayList<>();
@@ -122,49 +137,72 @@ public class GachaBoxPlugin extends JavaPlugin {
                 .color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
         meta.lore(lore);
 
-        meta.getPersistentDataContainer().set(boxKey, PersistentDataType.BYTE, (byte) 1);
+        meta.getPersistentDataContainer().set(boxIdKey, PersistentDataType.STRING, box.id);
         item.setItemMeta(meta);
         return item;
     }
 
     private boolean handleExoticBoxAdmin(CommandSender sender, String[] args) {
         if (args.length == 0) {
-            sender.sendMessage("§7Dung: /exoticbox <add item|add ecoin|remove <so_thu_tu>|info>");
+            sendUsage(sender);
             return true;
         }
 
         switch (args[0].toLowerCase()) {
+            case "create" -> {
+                if (args.length < 2) {
+                    sender.sendMessage("§7Dung: /exoticbox create <ten_hop>");
+                    return true;
+                }
+                String rawName = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
+                String id = BoxManager.toId(rawName);
+
+                if (boxManager.exists(id)) {
+                    sender.sendMessage("§cHop ten nay da ton tai roi.");
+                    return true;
+                }
+
+                boxManager.createBox(rawName);
+                sender.sendMessage("§d✿ §fDa tao hop moi: §e" + rawName + " §7(id: " + id + ")");
+            }
             case "add" -> {
                 if (!(sender instanceof Player player)) {
                     sender.sendMessage("§cLenh nay can dung trong game (de lay item dang cam).");
                     return true;
                 }
-                if (args.length < 3) {
-                    sender.sendMessage("§7Dung: /exoticbox add item <so_luong> <ti_le>");
-                    sender.sendMessage("§7Dung: /exoticbox add ecoin <so_ecoin> <ti_le>");
+                if (args.length < 4) {
+                    sender.sendMessage("§7Dung: /exoticbox add <ten_hop> item <so_luong> <ti_le>");
+                    sender.sendMessage("§7Dung: /exoticbox add <ten_hop> ecoin <so_ecoin> <ti_le>");
                     return true;
                 }
 
-                String rewardType = args[1].toLowerCase();
+                String id = BoxManager.toId(args[1]);
+                if (!boxManager.exists(id)) {
+                    sender.sendMessage("§cKhong tim thay hop nay. Dung /exoticbox create truoc.");
+                    return true;
+                }
+
+                String rewardType = args[2].toLowerCase();
 
                 try {
-                    double amountArg = Double.parseDouble(args[2]);
-                    double chance = args.length >= 4 ? Double.parseDouble(args[3]) : 1.0;
+                    double amountArg = Double.parseDouble(args[3]);
+                    double chance = args.length >= 5 ? Double.parseDouble(args[4]) : 1.0;
 
                     if (rewardType.equals("ecoin")) {
-                        rewardManager.addEcoinReward(amountArg, chance);
+                        boxManager.addEcoinReward(id, amountArg, chance);
                         sender.sendMessage(String.format(
-                                "§d✿ §fDa them phan thuong: §6%.0f Ecoin §f(ti le %.2f)", amountArg, chance));
+                                "§d✿ §fDa them phan thuong vao [%s]: §6%.0f Ecoin §f(ti le %.2f)",
+                                args[1], amountArg, chance));
                     } else if (rewardType.equals("item")) {
                         ItemStack held = player.getInventory().getItemInMainHand();
                         if (held.getType() == Material.AIR) {
                             sender.sendMessage("§cBan can cam vat pham tren tay truoc khi them.");
                             return true;
                         }
-                        rewardManager.addItemReward(held, (int) amountArg, chance);
+                        boxManager.addItemReward(id, held, (int) amountArg, chance);
                         sender.sendMessage(String.format(
-                                "§d✿ §fDa them phan thuong: §e%.0fx %s §f(ti le %.2f)",
-                                amountArg, held.getType().name(), chance));
+                                "§d✿ §fDa them phan thuong vao [%s]: §e%.0fx %s §f(ti le %.2f)",
+                                args[1], amountArg, held.getType().name(), chance));
                     } else {
                         sender.sendMessage("§cLoai phan thuong phai la 'item' hoac 'ecoin'.");
                     }
@@ -173,14 +211,19 @@ public class GachaBoxPlugin extends JavaPlugin {
                 }
             }
             case "remove" -> {
-                if (args.length < 2) {
-                    sender.sendMessage("§7Dung: /exoticbox remove <so_thu_tu> (xem so thu tu qua /exoticbox info)");
+                if (args.length < 3) {
+                    sender.sendMessage("§7Dung: /exoticbox remove <ten_hop> <so_thu_tu>");
+                    return true;
+                }
+                String id = BoxManager.toId(args[1]);
+                if (!boxManager.exists(id)) {
+                    sender.sendMessage("§cKhong tim thay hop nay.");
                     return true;
                 }
                 try {
-                    int index = Integer.parseInt(args[1]) - 1; // người dùng nhập 1-based, code 0-based
-                    if (rewardManager.removeReward(index)) {
-                        sender.sendMessage("§d✿ §fDa xoa phan thuong so §e" + args[1] + "§f.");
+                    int index = Integer.parseInt(args[2]) - 1;
+                    if (boxManager.removeReward(id, index)) {
+                        sender.sendMessage("§d✿ §fDa xoa phan thuong so §e" + args[2] + " §fkhoi [" + args[1] + "]");
                     } else {
                         sender.sendMessage("§cSo thu tu khong hop le.");
                     }
@@ -189,14 +232,27 @@ public class GachaBoxPlugin extends JavaPlugin {
                 }
             }
             case "info" -> {
-                List<RewardEntry> rewards = rewardManager.getRewards();
+                if (args.length < 2) {
+                    sender.sendMessage("§7Dung: /exoticbox info <ten_hop>");
+                    sender.sendMessage("§7Danh sach hop hien co: " +
+                            String.join(", ", boxManager.getAll().keySet()));
+                    return true;
+                }
+                String id = BoxManager.toId(args[1]);
+                BoxData box = boxManager.get(id);
+                if (box == null) {
+                    sender.sendMessage("§cKhong tim thay hop nay.");
+                    return true;
+                }
+
+                List<RewardEntry> rewards = box.rewards;
                 if (rewards.isEmpty()) {
-                    sender.sendMessage("§7Hien chua co phan thuong nao.");
+                    sender.sendMessage("§7Hop [" + box.displayName + "] chua co phan thuong nao.");
                     return true;
                 }
 
                 double total = rewards.stream().mapToDouble(r -> r.chance).sum();
-                sender.sendMessage("§d✿ §f§lDanh sach phan thuong Gacha Box:");
+                sender.sendMessage("§d✿ §f§lPhan thuong hop [" + box.displayName + "]:");
                 for (int i = 0; i < rewards.size(); i++) {
                     RewardEntry r = rewards.get(i);
                     double percent = total > 0 ? (r.chance / total) * 100 : 0;
@@ -205,9 +261,13 @@ public class GachaBoxPlugin extends JavaPlugin {
                             i + 1, r.describe(), percent, r.chance));
                 }
             }
-            default -> sender.sendMessage("§7Dung: /exoticbox <add item|add ecoin|remove <so_thu_tu>|info>");
+            default -> sendUsage(sender);
         }
 
         return true;
+    }
+
+    private void sendUsage(CommandSender sender) {
+        sender.sendMessage("§7Dung: /exoticbox <create|add|remove|info> <ten_hop> ...");
     }
 }

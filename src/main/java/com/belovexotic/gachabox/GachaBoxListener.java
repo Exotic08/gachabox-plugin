@@ -16,15 +16,15 @@ import org.bukkit.persistence.PersistentDataType;
 public class GachaBoxListener implements Listener {
 
     private final GachaBoxPlugin plugin;
-    private final RewardManager rewardManager;
+    private final BoxManager boxManager;
     private final Economy economy;
-    private final NamespacedKey boxKey;
+    private final NamespacedKey boxIdKey;
 
-    public GachaBoxListener(GachaBoxPlugin plugin, RewardManager rewardManager, Economy economy) {
+    public GachaBoxListener(GachaBoxPlugin plugin, BoxManager boxManager, Economy economy) {
         this.plugin = plugin;
-        this.rewardManager = rewardManager;
+        this.boxManager = boxManager;
         this.economy = economy;
-        this.boxKey = new NamespacedKey(plugin, "gacha_box");
+        this.boxIdKey = new NamespacedKey(plugin, "gacha_box_id");
     }
 
     @EventHandler
@@ -37,18 +37,19 @@ public class GachaBoxListener implements Listener {
 
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
-        if (!meta.getPersistentDataContainer().has(boxKey, PersistentDataType.BYTE)) return;
+
+        String boxId = meta.getPersistentDataContainer().get(boxIdKey, PersistentDataType.STRING);
+        if (boxId == null) return;
 
         event.setCancelled(true);
 
-        RewardEntry reward = rewardManager.rollReward();
+        RewardEntry reward = boxManager.rollReward(boxId);
         if (reward == null) {
-            player.sendMessage(Component.text("✿ Hiện chưa có phần thưởng nào được thiết lập, liên hệ admin!")
+            player.sendMessage(Component.text("✿ Hộp này hiện chưa có phần thưởng nào, liên hệ admin!")
                     .color(NamedTextColor.RED));
             return;
         }
 
-        // Trừ 1 hộp khỏi tay
         if (item.getAmount() > 1) {
             item.setAmount(item.getAmount() - 1);
         } else {
