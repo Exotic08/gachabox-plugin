@@ -1,5 +1,7 @@
 package com.belovexotic.gachabox;
 
+import com.mojang.authlib.GameProfile;
+import com.mojang.authlib.properties.Property;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -11,19 +13,21 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class GachaBoxPlugin extends JavaPlugin {
 
     private Economy economy;
     private BoxManager boxManager;
     private NamespacedKey boxIdKey;
-    private static final double BOX_PRICE = 1000.0;
 
     @Override
     public void onEnable() {
@@ -65,12 +69,12 @@ public class GachaBoxPlugin extends JavaPlugin {
 
     private boolean handleBuyBox(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("§cLenh nay chi dung duoc trong game.");
+            sender.sendMessage("§cLệnh này chỉ dùng được trong game.");
             return true;
         }
 
         if (args.length < 1) {
-            player.sendMessage("§7Dung: /buyexoticbox <ten_hop> [so_luong]");
+            player.sendMessage("§7Dùng: /buyexoticbox <tên_hộp> [số_lượng]");
             return true;
         }
 
@@ -78,7 +82,7 @@ public class GachaBoxPlugin extends JavaPlugin {
         String id = BoxManager.toId(rawName);
 
         if (!boxManager.exists(id)) {
-            player.sendMessage("§cKhong tim thay hop ten \"" + rawName + "\". Kiem tra lai ten hoac nho admin tao truoc.");
+            player.sendMessage("§cKhông tìm thấy hộp tên \"" + rawName + "\". Kiểm tra lại tên hoặc nhờ admin tạo trước.");
             return true;
         }
 
@@ -87,16 +91,17 @@ public class GachaBoxPlugin extends JavaPlugin {
             try {
                 amount = Integer.parseInt(args[1]);
                 if (amount <= 0) {
-                    player.sendMessage("§cSo luong phai lon hon 0.");
+                    player.sendMessage("§cSố lượng phải lớn hơn 0.");
                     return true;
                 }
             } catch (NumberFormatException e) {
-                player.sendMessage("§cSo luong khong hop le.");
+                player.sendMessage("§cSố lượng không hợp lệ.");
                 return true;
             }
         }
 
-        double totalPrice = BOX_PRICE * amount;
+        BoxData box = boxManager.get(id);
+        double totalPrice = box.price * amount;
         double balance = economy.getBalance(player);
 
         if (balance < totalPrice) {
@@ -108,7 +113,6 @@ public class GachaBoxPlugin extends JavaPlugin {
 
         economy.withdrawPlayer(player, totalPrice);
 
-        BoxData box = boxManager.get(id);
         int remaining = amount;
         while (remaining > 0) {
             int stackSize = Math.min(remaining, 64);
@@ -131,13 +135,27 @@ public class GachaBoxPlugin extends JavaPlugin {
                 .color(NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.BOLD, true));
 
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.text("Click chuột phải để mở hộp")
-                .color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-        lore.add(Component.text("Nhận ngẫu nhiên phần thưởng")
-                .color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        lore.add(Component.text("Chuột Trái: Xem thông tin phần thưởng")
+                .color(NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
+        lore.add(Component.text("Chuột Phải: Mở hộp nhận đồ ngẫu nhiên")
+                .color(NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
         meta.lore(lore);
 
         meta.getPersistentDataContainer().set(boxIdKey, PersistentDataType.STRING, box.id);
+
+        // Đặt Skin Custom bằng Base64 thông qua Reflection an toàn
+        if (meta instanceof SkullMeta skullMeta && box.texture != null && !box.texture.isEmpty()) {
+            try {
+                GameProfile profile = new GameProfile(UUID.randomUUID(), null);
+                profile.getProperties().put("textures", new Property("textures", box.texture));
+                Field profileField = skullMeta.getClass().getDeclaredField("profile");
+                profileField.setAccessible(true);
+                profileField.set(skullMeta, profile);
+            } catch (Exception e) {
+                getLogger().warning("Khong the load skin cho hop: " + box.displayName);
+            }
+        }
+
         item.setItemMeta(meta);
         return item;
     }
@@ -151,34 +169,69 @@ public class GachaBoxPlugin extends JavaPlugin {
         switch (args[0].toLowerCase()) {
             case "create" -> {
                 if (args.length < 2) {
-                    sender.sendMessage("§7Dung: /exoticbox create <ten_hop>");
+                    sender.sendMessage("§7Dùng: /exoticbox create <tên_hộp>");
                     return true;
                 }
                 String rawName = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
                 String id = BoxManager.toId(rawName);
 
                 if (boxManager.exists(id)) {
-                    sender.sendMessage("§cHop ten nay da ton tai roi.");
+                    sender.sendMessage("§cHộp tên này đã tồn tại rồi.");
                     return true;
                 }
 
                 boxManager.createBox(rawName);
-                sender.sendMessage("§d✿ §fDa tao hop moi: §e" + rawName + " §7(id: " + id + ")");
+                sender.sendMessage("§d✿ §fĐã tạo hộp mới: §e" + rawName + " §7(id: " + id + ")");
+            }
+            case "price" -> {
+                if (args.length < 3) {
+                    sender.sendMessage("§7Dùng: /exoticbox price <tên_hộp> <giá_tiền>");
+                    return true;
+                }
+                String id = BoxManager.toId(args[1]);
+                BoxData box = boxManager.get(id);
+                if (box == null) {
+                    sender.sendMessage("§cKhông tìm thấy hộp này.");
+                    return true;
+                }
+                try {
+                    double newPrice = Double.parseDouble(args[2]);
+                    box.price = newPrice;
+                    boxManager.save();
+                    sender.sendMessage("§d✿ §fĐã đổi giá của hộp §e" + box.displayName + " §fthành §6" + newPrice + " Ecoin");
+                } catch (NumberFormatException e) {
+                    sender.sendMessage("§cGiá tiền không hợp lệ.");
+                }
+            }
+            case "skin" -> {
+                if (args.length < 3) {
+                    sender.sendMessage("§7Dùng: /exoticbox skin <tên_hộp> <mã_base64_skin>");
+                    return true;
+                }
+                String id = BoxManager.toId(args[1]);
+                BoxData box = boxManager.get(id);
+                if (box == null) {
+                    sender.sendMessage("§cKhông tìm thấy hộp này.");
+                    return true;
+                }
+                box.texture = args[2];
+                boxManager.save();
+                sender.sendMessage("§d✿ §fĐã thay đổi skin cho hộp §e" + box.displayName);
             }
             case "add" -> {
                 if (!(sender instanceof Player player)) {
-                    sender.sendMessage("§cLenh nay can dung trong game (de lay item dang cam).");
+                    sender.sendMessage("§cLệnh này cần dùng trong game (để lấy item đang cầm).");
                     return true;
                 }
                 if (args.length < 4) {
-                    sender.sendMessage("§7Dung: /exoticbox add <ten_hop> item <so_luong> <ti_le>");
-                    sender.sendMessage("§7Dung: /exoticbox add <ten_hop> ecoin <so_ecoin> <ti_le>");
+                    sender.sendMessage("§7Dùng: /exoticbox add <tên_hộp> item <số_lượng> <tỉ_lệ>");
+                    sender.sendMessage("§7Dùng: /exoticbox add <tên_hộp> ecoin <số_ecoin> <tỉ_lệ>");
                     return true;
                 }
 
                 String id = BoxManager.toId(args[1]);
                 if (!boxManager.exists(id)) {
-                    sender.sendMessage("§cKhong tim thay hop nay. Dung /exoticbox create truoc.");
+                    sender.sendMessage("§cKhông tìm thấy hộp này. Dùng /exoticbox create trước.");
                     return true;
                 }
 
@@ -191,73 +244,73 @@ public class GachaBoxPlugin extends JavaPlugin {
                     if (rewardType.equals("ecoin")) {
                         boxManager.addEcoinReward(id, amountArg, chance);
                         sender.sendMessage(String.format(
-                                "§d✿ §fDa them phan thuong vao [%s]: §6%.0f Ecoin §f(ti le %.2f)",
+                                "§d✿ §fĐã thêm phần thưởng vào [%s]: §6%.0f Ecoin §f(tỉ lệ %.2f)",
                                 args[1], amountArg, chance));
                     } else if (rewardType.equals("item")) {
                         ItemStack held = player.getInventory().getItemInMainHand();
                         if (held.getType() == Material.AIR) {
-                            sender.sendMessage("§cBan can cam vat pham tren tay truoc khi them.");
+                            sender.sendMessage("§cBạn cần cầm vật phẩm trên tay trước khi thêm.");
                             return true;
                         }
                         boxManager.addItemReward(id, held, (int) amountArg, chance);
                         sender.sendMessage(String.format(
-                                "§d✿ §fDa them phan thuong vao [%s]: §e%.0fx %s §f(ti le %.2f)",
+                                "§d✿ §fĐã thêm phần thưởng vào [%s]: §e%.0fx %s §f(tỉ lệ %.2f)",
                                 args[1], amountArg, held.getType().name(), chance));
                     } else {
-                        sender.sendMessage("§cLoai phan thuong phai la 'item' hoac 'ecoin'.");
+                        sender.sendMessage("§cLoại phần thưởng phải là 'item' hoặc 'ecoin'.");
                     }
                 } catch (NumberFormatException e) {
-                    sender.sendMessage("§cSo luong hoac ti le khong hop le.");
+                    sender.sendMessage("§cSố lượng hoặc tỉ lệ không hợp lệ.");
                 }
             }
             case "remove" -> {
                 if (args.length < 3) {
-                    sender.sendMessage("§7Dung: /exoticbox remove <ten_hop> <so_thu_tu>");
+                    sender.sendMessage("§7Dùng: /exoticbox remove <tên_hộp> <số_thứ_tự>");
                     return true;
                 }
                 String id = BoxManager.toId(args[1]);
                 if (!boxManager.exists(id)) {
-                    sender.sendMessage("§cKhong tim thay hop nay.");
+                    sender.sendMessage("§cKhông tìm thấy hộp này.");
                     return true;
                 }
                 try {
                     int index = Integer.parseInt(args[2]) - 1;
                     if (boxManager.removeReward(id, index)) {
-                        sender.sendMessage("§d✿ §fDa xoa phan thuong so §e" + args[2] + " §fkhoi [" + args[1] + "]");
+                        sender.sendMessage("§d✿ §fĐã xoá phần thưởng số §e" + args[2] + " §fkhỏi [" + args[1] + "]");
                     } else {
-                        sender.sendMessage("§cSo thu tu khong hop le.");
+                        sender.sendMessage("§cSố thứ tự không hợp lệ.");
                     }
                 } catch (NumberFormatException e) {
-                    sender.sendMessage("§cSo thu tu khong hop le.");
+                    sender.sendMessage("§cSố thứ tự không hợp lệ.");
                 }
             }
             case "info" -> {
                 if (args.length < 2) {
-                    sender.sendMessage("§7Dung: /exoticbox info <ten_hop>");
-                    sender.sendMessage("§7Danh sach hop hien co: " +
+                    sender.sendMessage("§7Dùng: /exoticbox info <tên_hộp>");
+                    sender.sendMessage("§7Danh sách hộp hiện có: §e" +
                             String.join(", ", boxManager.getAll().keySet()));
                     return true;
                 }
                 String id = BoxManager.toId(args[1]);
                 BoxData box = boxManager.get(id);
                 if (box == null) {
-                    sender.sendMessage("§cKhong tim thay hop nay.");
+                    sender.sendMessage("§cKhông tìm thấy hộp này.");
                     return true;
                 }
 
                 List<RewardEntry> rewards = box.rewards;
                 if (rewards.isEmpty()) {
-                    sender.sendMessage("§7Hop [" + box.displayName + "] chua co phan thuong nao.");
+                    sender.sendMessage("§7Hộp [" + box.displayName + "] chưa có phần thưởng nào.");
                     return true;
                 }
 
                 double total = rewards.stream().mapToDouble(r -> r.chance).sum();
-                sender.sendMessage("§d✿ §f§lPhan thuong hop [" + box.displayName + "]:");
+                sender.sendMessage("§d✿ §f§lPhần thưởng hộp [" + box.displayName + "]:");
                 for (int i = 0; i < rewards.size(); i++) {
                     RewardEntry r = rewards.get(i);
                     double percent = total > 0 ? (r.chance / total) * 100 : 0;
                     sender.sendMessage(String.format(
-                            "§7%d. §f%s §7- %.2f%% §8(trong so: %.2f)",
+                            "§7%d. §f%s §7- %.2f%% §8(trọng số: %.2f)",
                             i + 1, r.describe(), percent, r.chance));
                 }
             }
@@ -268,6 +321,15 @@ public class GachaBoxPlugin extends JavaPlugin {
     }
 
     private void sendUsage(CommandSender sender) {
-        sender.sendMessage("§7Dung: /exoticbox <create|add|remove|info> <ten_hop> ...");
+        sender.sendMessage(" ");
+        sender.sendMessage("§d✿ §lHƯỚNG DẪN LỆNH GACHA BOX §d✿");
+        sender.sendMessage("§e/exoticbox create <tên_hộp> §f- Tạo một loại hộp mới.");
+        sender.sendMessage("§e/exoticbox price <tên_hộp> <giá> §f- Đặt giá bán cho hộp bằng Ecoin.");
+        sender.sendMessage("§e/exoticbox skin <tên_hộp> <base64> §f- Thay đổi skin (đầu hộp quà) bằng mã Base64.");
+        sender.sendMessage("§e/exoticbox add <tên> item <SL> <tỉ_lệ> §f- Thêm item bạn đang cầm vào hộp.");
+        sender.sendMessage("§e/exoticbox add <tên> ecoin <SL> <tỉ_lệ> §f- Thêm Ecoin vào hộp.");
+        sender.sendMessage("§e/exoticbox info <tên_hộp> §f- Xem danh sách phần thưởng và tỉ lệ rớt.");
+        sender.sendMessage("§e/exoticbox remove <tên_hộp> <số_TT> §f- Xoá phần thưởng dựa vào Số Thứ Tự (xem trong lệnh info).");
+        sender.sendMessage(" ");
     }
 }
